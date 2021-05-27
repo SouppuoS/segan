@@ -22,9 +22,12 @@ class segan():
 
         epoch_max = epoch
         clsLoss   = nn.BCELoss()
+        l1Loss    = nn.L1Loss()
         sgnLoss   = singlesrc_neg_sisdr
         d_optim   = opt.Adam(self.D.parameters())
         g_optim   = opt.Adam(self.G.parameters())
+
+        _lambda   = 20
 
         pos_tgt   = torch.tensor([1. for _ in range(batch_size)], device=self.device)
         neg_tgt   = torch.tensor([0. for _ in range(batch_size)], device=self.device)
@@ -54,7 +57,7 @@ class segan():
                 recon   = self.G(noisy)
                 ins_s3  = torch.cat((recon, clean), dim=1)
                 rst_s3  = self.D(ins_s3)
-                loss_G  = clsLoss(rst_s3[:, 0, 0], pos_tgt)               
+                loss_G  = clsLoss(rst_s3[:, 0, 0], pos_tgt) + _lambda * l1Loss(recon, clean)
 
                 g_optim.zero_grad()
                 loss_G.backward()
@@ -69,9 +72,13 @@ class segan():
                     losses.append(loss)
             print('val loss = {:.4f}'.format(sum(losses) / len(losses)))
 
+            if (ep + 1) % 5 == 0:
+                torch.save(self.G, f'model_G_{ep}.pt')
+                torch.save(self.D, f'model_D_{ep}.pt')
+
 if __name__ == '__main__':
     path_data_json = {'tr': './data-enh-210526/1speakers/wav8k/min/tr',
                       'cv': './data-enh-210526/1speakers/wav8k/min/cv',
                       'tt': './data-enh-210526/1speakers/wav8k/min/tt',}
     model = segan(device='cuda')
-    model.train(tr_path=path_data_json['tr'], cv_path=path_data_json['cv'])
+    model.train(tr_path=path_data_json['tr'], cv_path=path_data_json['cv'], batch_size=24)
