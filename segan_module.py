@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 
 class wavnetlike(nn.Module):
@@ -6,6 +7,7 @@ class wavnetlike(nn.Module):
 
         self.num_layer = len(channel_size) - 1
         self.cnn       = nn.ModuleList([])
+        self.skipTns   = nn.ModuleList([])
         for i in range(self.num_layer):
             if rev:
                 self.cnn.append(nn.ConvTranspose1d(in_channels=channel_size[i + 1],
@@ -14,6 +16,10 @@ class wavnetlike(nn.Module):
                                                    stride=stride, 
                                                    padding=kernal_size // 2,
                                                    output_padding=1))
+                self.skipTns.append(nn.Conv1d(in_channels=channel_size[i + 1] // 2,
+                                              out_channels=channel_size[i + 1], 
+                                              kernel_size=1, 
+                                              stride=1))
             else:
                 self.cnn.append(nn.Conv1d(in_channels=channel_size[i],
                                           out_channels=channel_size[i + 1], 
@@ -29,7 +35,7 @@ class g_module(nn.Module):
         super(g_module, self).__init__()
         self.cfg = chnlCfg
         self.enc = wavnetlike(channel_size=chnlCfg)
-        self.dec = wavnetlike(channel_size=chnlCfg, rev=True)
+        self.dec = wavnetlike(channel_size=[1] + [2 * v for v in chnlCfg[1:]], rev=True)
         self.act = nn.PReLU()
 
     def forward(self, inputs):
@@ -40,11 +46,15 @@ class g_module(nn.Module):
             output = self.act(cnn(output))
             outs.append(output)
 
-        # TODO: concate?
-        output = outs[-1]
+        # "sample the noise samples z from our prior 8×1024-dimensional normal distribu-tion N(0, I). "
+        # "skip connections and the addition of the latent vector make the number of feature maps in every layer to be doubled"
+        z      = torch.randn(outs[-1].shape, device=outs[-1].device)
+        output = torch.cat((outs[-1], z), dim=1)
 
-        for skip, cnn in zip(outs[::-1], self.dec.cnn[::-1]):
-            output = self.act(cnn(output + skip))
+        output = self.act(self.dec.cnn[-1](output))
+
+        for skip, cnn, trn in zip(outs[-2::-1], self.dec.cnn[-2::-1], self.dec.skipTns[-2::-1]):
+            output = self.act(cnn(output + trn(skip)))
 
         return output
 
